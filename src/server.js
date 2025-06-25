@@ -30,7 +30,7 @@ app.use(session({
 app.use('/api/auth', authRoutes);
 
 // Protected user routes
-app.use('api/spotify', requireAuth(), spotifyRoutes);
+app.use('/api/spotify', spotifyRoutes);
 app.use('/api/user', requireAuth(), userRoutes);
 
 

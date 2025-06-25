@@ -1,47 +1,62 @@
-import express, { query, request } from 'express';
+import express from 'express';
 import pool from '../config/db.js';
 import dotEnv from 'dotenv';
 import session from 'express-session';
-import { redirect } from '@clerk/clerk-sdk-node';
+import { requireAuth } from '@clerk/express';
+import request from 'request-promise-native';
 dotEnv.config();
 
 const router = express.Router();
 
 const client_id = process.env.SPOTIFY_CLIENT_ID;
+const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
+const redirect_uri = "https://d5c7-57-132-165-78.ngrok-free.app/api/spotify/authorization-callback";
 
-router.post('/authorize', (req, res) => {
-    const redirect_uri = process.env.API_BASE_URL + '/spotify/authorization-callback';
+function generateRandomString(length) {
+    let result = '';
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    for (let i = 0; i < length; i++) {
+        result += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return result;
+}
+
+// Utility function to create query string
+function querystringify(params) {
+    return new URLSearchParams(params).toString();
+}
+
+router.post('/get-auth-url', requireAuth(), (req, res) => {
     const state = generateRandomString(16);
     const scope = 'user-top-read user-read-recently-played';
 
-    const user_id = req.auth.userId;
+    const user_id = req.auth();
     if (!user_id) {
-        res.status(400).send('User ID is required for Spotify authorization.');
+        res.status(400).json({ error: 'User ID is required for Spotify authorization.' });
         return;
     }
 
-    req.session.userId = user_id; // Store user ID in session
-    req.session.spotifyState = state; // Store state in session
+    // Store state in session for verification later
+    req.session.userId = user_id;
+    req.session.spotifyState = state;
 
-    res.redirect('https://accounts.spotify.com/authorize?' +
+    const authUrl = 'https://accounts.spotify.com/authorize?' +
         querystringify({
             response_type: 'code',
             client_id: client_id,
             scope: scope,
             redirect_uri: redirect_uri,
             state: state
-        })
+        });
 
-    );
-
+    res.json({ authUrl });
 });
-
 
 router.get('/authorization-callback', async (req, res) => {
     const storedState = req.session.spotifyState;
-    redirect_uri = "TODO: APP DEEPLINK URL SUCCESS OR FAILURE";
-
+    res.set('ngrok-skip-browser-warning', 'true');
     if (storedState === null || storedState !== req.query.state) {
+        console.log('State mismatch:', storedState, req.query.state);
         res.status(400).send('State mismatch.');
         return;
     }
@@ -78,7 +93,7 @@ router.get('/authorization-callback', async (req, res) => {
         },
         headers: {
             'content-type': 'application/x-www-form-urlencoded',
-            'Authorization': 'Basic ' + (new Buffer.from(client_id + ':' + client_secret).toString('base64'))
+            'Authorization': 'Basic ' + ( Buffer.from(client_id + ':' + client_secret).toString('base64'))
         },
         json: true
     };
@@ -91,24 +106,19 @@ router.get('/authorization-callback', async (req, res) => {
         }
         const { access_token, refresh_token, expires_in } = response.body;
 
-        res.redirect("TODO: APP DEEPLINK URL SUCCESS OR FAILURE");
-
         const query = 'UPDATE users SET spotify_access_token = $1, spotify_refresh_token = $2, spotify_expires_at = $3, updated_at = NOW() WHERE clerk_id = $4';
         const expiryTime = new Date(Date.now() + expires_in * 1000);
         const values = [access_token, refresh_token, expiryTime, userId];
         const result = await pool.query(query, values);
         if (result.rowCount === 1) {
-            console.log(`Updated spotify tokens for user ${userId}`);
-            res.status(200).json({ message: "Spotify tokens updated successfully" });
+            res.redirect(`irp2605-bandwagon://spotify-auth?success=true`)
         } else {
-            console.log(`User ${userId} not found or spotify tokens`);
-            res.status(404).json({ error: "User not found or spotify tokens not updated" });
+            res.redirect(`irp2605-bandwagon://spotify-auth?error=user_not_found`);
         }
 
     } catch (error) {
         console.error('Error during Spotify authorization callback:', error);
-        res.status(500).send('Internal Server Error');
-        return;
+        res.redirect(`irp2605-bandwagon://spotify-auth?error=token_exchange_failed`);
     }
 
 

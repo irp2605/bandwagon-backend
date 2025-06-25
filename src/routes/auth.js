@@ -44,6 +44,7 @@ const deleteUser = async (clerkUser) => {
 }
 
 router.post("/webhooks/clerk", async (req, res) => {
+  const { type, data } = req.body;
   const webhook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
   try {
     webhook.verify(JSON.stringify(req.body), req.headers);
@@ -72,7 +73,7 @@ router.post("/webhooks/clerk", async (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: "Invalid webhook signature" });
   }
-  const { type, data } = req.body;
+  
 });
 
 export default router;
