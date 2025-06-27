@@ -44,6 +44,7 @@ const deleteUser = async (clerkUser) => {
 }
 
 router.post("/webhooks/clerk", async (req, res) => {
+  console.log("Received Clerk webhook event");
   const { type, data } = req.body;
   const webhook = new Webhook(process.env.CLERK_WEBHOOK_SECRET);
   try {
@@ -55,6 +56,7 @@ router.post("/webhooks/clerk", async (req, res) => {
           res.status(200).json({ message: "User updated" });
           break;
         case "user.created":
+          console.log("Creating user:", data);
           await syncUser(data);
           res.status(200).json({ message: "User created" });
           break;
@@ -63,6 +65,7 @@ router.post("/webhooks/clerk", async (req, res) => {
           res.status(200).json({ message: "User deleted" });
           break;
         default:
+          console.log("Unknown event type:", type);
           res.status(400).json({ error: "Unknown event type" });
       }
     }
@@ -71,6 +74,7 @@ router.post("/webhooks/clerk", async (req, res) => {
       res.status(500).json({ error: "Internal Server Error" });
     }
   } catch (err) {
+    console.error("Invalid webhook signature:", err);
     return res.status(400).json({ error: "Invalid webhook signature" });
   }
   

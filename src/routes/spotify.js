@@ -3,14 +3,14 @@ import pool from '../config/db.js';
 import dotEnv from 'dotenv';
 import session from 'express-session';
 import { requireAuth } from '@clerk/express';
-import request from 'request-promise-native';
+import db from '../config/db.js';
 dotEnv.config();
 
 const router = express.Router();
 
 const client_id = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-const redirect_uri = "https://d5c7-57-132-165-78.ngrok-free.app/api/spotify/authorization-callback";
+const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify/authorization-callback";
 
 function generateRandomString(length) {
     let result = '';
@@ -26,19 +26,21 @@ function querystringify(params) {
     return new URLSearchParams(params).toString();
 }
 
-router.post('/get-auth-url', requireAuth(), (req, res) => {
+router.post('/get-auth-url', requireAuth(), async (req, res) => {
     const state = generateRandomString(16);
     const scope = 'user-top-read user-read-recently-played';
 
-    const user_id = req.auth();
+    const auth = req.auth();
+    const user_id = auth.userId; 
     if (!user_id) {
         res.status(400).json({ error: 'User ID is required for Spotify authorization.' });
         return;
     }
 
     // Store state in session for verification later
-    req.session.userId = user_id;
-    req.session.spotifyState = state;
+    const query = 'INSERT INTO spotify_oauth_states (state, created_at, used, user_id) VALUES ($1, NOW(), FALSE, $2)';
+    console.log('Storing state in database:', state, user_id);
+    await pool.query(query, [state, user_id]);
 
     const authUrl = 'https://accounts.spotify.com/authorize?' +
         querystringify({
@@ -53,22 +55,24 @@ router.post('/get-auth-url', requireAuth(), (req, res) => {
 });
 
 router.get('/authorization-callback', async (req, res) => {
-    const storedState = req.session.spotifyState;
+    const storedState = req.query.state;
     res.set('ngrok-skip-browser-warning', 'true');
-    if (storedState === null || storedState !== req.query.state) {
-        console.log('State mismatch:', storedState, req.query.state);
-        res.status(400).send('State mismatch.');
-        return;
+    console.log('Received state:', storedState);
+
+
+    const stateResult = await db.query(
+        'SELECT * FROM spotify_oauth_states WHERE state = $1 AND used = FALSE',
+        [storedState]
+    );
+
+    if (stateResult.rows.length === 0) {
+        return res.status(400).json({ error: 'Invalid or expired state' });
     }
 
-    const userId = req.session.userId;
-    if (!userId) {
-        res.status(400).send('User ID not found in session.');
-        return;
-    }
+    const userId = stateResult.rows[0].user_id;
 
-    delete req.session.spotifyState;
-    delete req.session.userId;
+    const query = 'UPDATE spotify_oauth_states SET used = TRUE WHERE state = $1';
+    await pool.query(query, [storedState]);
 
     const error = req.query.error;
     if (error) {
@@ -84,27 +88,34 @@ router.get('/authorization-callback', async (req, res) => {
         // TODO: Handle error, probably need to redirect back to the apps original spotify authorization page
     }
 
-    var authOptions = {
-        url: 'https://accounts.spotify.com/api/token',
-        form: {
-            code: code,
-            redirect_uri: redirect_uri,
-            grant_type: 'authorization_code'
-        },
-        headers: {
-            'content-type': 'application/x-www-form-urlencoded',
-            'Authorization': 'Basic ' + ( Buffer.from(client_id + ':' + client_secret).toString('base64'))
-        },
-        json: true
-    };
+    const formData = new URLSearchParams({
+        code: code,
+        redirect_uri: redirect_uri,
+        grant_type: 'authorization_code'
+    });
+        
+    const authHeader = 'Basic ' + Buffer.from(client_id + ':' + client_secret).toString('base64');
+
 
     try {
-        const response = await request.post(authOptions);
-        if (response.statusCode !== 200) {
-            res.status(response.statusCode).send('Failed to retrieve access token.');
-            return; // TODO: HANDLE ERROR, PROBABLY NEED TO REDIRECT BACK TO THE APPS ORIGINAL SPOTIFY AUTHORIZATION PAGE
+        const response = await fetch('https://accounts.spotify.com/api/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Authorization': authHeader
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to retrieve access token:', response.status, errorText);
+            res.redirect(`irp2605-bandwagon://spotify-auth?error=token_request_failed&status=${response.status}`);
+            return;
         }
-        const { access_token, refresh_token, expires_in } = response.body;
+        
+        const tokenData = await response.json();
+        const { access_token, refresh_token, expires_in } = tokenData;
 
         const query = 'UPDATE users SET spotify_access_token = $1, spotify_refresh_token = $2, spotify_expires_at = $3, updated_at = NOW() WHERE clerk_id = $4';
         const expiryTime = new Date(Date.now() + expires_in * 1000);
