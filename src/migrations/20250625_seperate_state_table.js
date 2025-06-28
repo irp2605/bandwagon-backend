@@ -1,4 +1,3 @@
-// using a session based approach makes the state storage unnecessary
 import db from '../config/db.js';
 
 export async function up() {
