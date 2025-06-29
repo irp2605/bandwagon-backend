@@ -1,7 +1,6 @@
 import express from 'express';
 import pool from '../config/db.js';
 import dotEnv from 'dotenv';
-import session from 'express-session';
 import { requireAuth } from '@clerk/express';
 import db from '../config/db.js';
 dotEnv.config();
