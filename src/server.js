@@ -1,7 +1,7 @@
 import express from 'express';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/user.js';
-import spotifyRoutes from './routes/spotify.js';
+import spotifyAuthRoutes from './routes/spotify-auth.js';
 import userRelationsRoutes from './routes/user-relations.js';
 import { clerkMiddleware, requireAuth } from '@clerk/express';
 import session from 'express-session';
@@ -30,8 +30,8 @@ app.use(session({
 // Auth routes
 app.use('/api/auth', authRoutes);
 
-// Unprotected spotify routes
-app.use('/api/spotify', spotifyRoutes);
+// Unprotected spotify auth routes
+app.use('/api/spotify-auth', spotifyAuthRoutes);
 
 // Protected routes
 app.use('/api/user', requireAuth(), userRoutes);

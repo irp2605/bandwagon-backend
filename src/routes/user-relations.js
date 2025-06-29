@@ -79,6 +79,40 @@ router.post("/alter-friend-request-status", async (req, res) => {
     }
 });
 
+router.get("/get-relations-certain-status", async (req, res) => {
+    try {
+        const userId = req.auth.userId;
+        const { status } = req.query;
+
+        if (!userId || !status) {
+            return res.status(400).json({ error: "User ID and status must be present" });
+        }
+
+        // Validate status
+        const validStatuses = ['pending', 'accepted', 'declined'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: "Invalid status provided" });
+        }
+
+        // Get relations based on the status
+        const query = `
+            SELECT * FROM user_relations 
+            WHERE (user1_id = $1 OR user2_id = $1) AND status = $2
+        `;
+        const result = await pool.query(query, [userId, status]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "No relations found for the given status" });
+        }
+
+        return res.status(200).json(result.rows);
+    }
+    catch (err) {
+        console.error("Error getting relations by status:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 
 
 router.post("/block-user", async (req, res) => {
