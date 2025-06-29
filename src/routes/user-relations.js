@@ -50,4 +50,81 @@ router.post("/send-friend-request", async (req, res) => {
 
 });
 
+router.post("/accept-friend-request", async (req, res) => {
+    try {
+        const { accepterId } = req.auth.userId;
+        const { accepteeId } = req.body;
+
+        if (!accepterId || !accepteeId || accepterId === accepteeId) {
+            return res.status(400).json({ error: "Accepter ID and acceptee ID must be present and distinct" });
+        }
+
+        // Check if the request exists
+        const [lowerId, higherId] = accepterId < accepteeId ? [accepterId, accepteeId] : [accepteeId, accepterId];
+        const checkRequestQuery = 'SELECT * FROM user_relations WHERE user1_id = $1 AND user2_id = $2';
+        const requestResult = await pool.query(checkRequestQuery, [lowerId, higherId]);
+        if (requestResult.rowCount === 0 || requestResult.rows[0].status !== 'pending') {
+            return res.status(404).json({ error: "Friend request not found or is invalid for acceptance." });
+        }
+
+        // Update the status to accepted
+        const updateQuery = `UPDATE user_relations SET status = 'accepted', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
+        await pool.query(updateQuery, [lowerId, higherId]);
+        console.log(`Friend request accepted from ${accepterId} to ${accepteeId}`);
+        return res.status(200).json({ message: "Friend request accepted successfully" });
+
+    } catch (err) {
+        console.error("Error accepting friend request:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
+router.post("/block-user", async (req, res) => {
+    try {
+        const blockerId = req.auth.userId;
+        const { blockeeId } = req.body;
+
+        if (!blockerId || !blockeeId || blockerId === blockeeId) {
+            return res.status(400).json({ error: "Blocker ID and blockee ID must be present and distinct" });
+        }
+
+        // Check if the blockee exists
+        const checkBlockeeQuery = 'SELECT id FROM users WHERE clerk_id = $1';
+        const blockeeResult = await pool.query(checkBlockeeQuery, [blockeeId]);
+        if (blockeeResult.rowCount === 0) {
+            return res.status(404).json({ error: "Blockee not found" });
+        }
+
+        // Check if a relationship already exists
+        const [lowerId, higherId] = blockerId < blockeeId ? [blockerId, blockeeId] : [blockeeId, blockerId];
+        const checkRequestQuery = 'SELECT * FROM user_relations WHERE user1_id = $1 AND user2_id = $2';
+        const requestResult = await pool.query(checkRequestQuery, [lowerId, higherId]);
+
+        if (requestResult.rowCount > 0) {
+            if (blockerId < blockeeId) {
+                const updateQuery = `UPDATE user_relations set user1_blocked_user2 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
+            }
+            else {
+                const updateQuery = `UPDATE user_relations set user2_blocked_user1 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
+            }
+            await pool.query(updateQuery, [lowerId, higherId]);
+            console.log(`User ${blockerId} blocked user ${blockeeId} on pre-existing relation`);
+        }
+        else {
+            if(blockerId < blockeeId) {
+                const insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, true, false)`;
+            }
+            else {
+                const insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, false, true)`;
+            }
+            await pool.query(insertQuery, [lowerId, higherId, blockerId]);
+            console.log(`User ${blockerId} blocked user ${blockeeId} by creating a new relation`);
+        }
+        return res.status(200).json({ message: "User blocked successfully" });
+    } catch (err) {
+        console.error("Error blocking user:", err);
+        return res.status(500).json({ error: "Internal Server Error" });
+    }
+});
+
 export default router;
