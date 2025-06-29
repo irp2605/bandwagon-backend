@@ -50,34 +50,36 @@ router.post("/send-friend-request", async (req, res) => {
 
 });
 
-router.post("/accept-friend-request", async (req, res) => {
+router.post("/alter-friend-request-status", async (req, res) => {
     try {
-        const { accepterId } = req.auth.userId;
-        const { accepteeId } = req.body;
+        const { changerId } = req.auth.userId;
+        const { changeeId, newStatus } = req.body;
 
-        if (!accepterId || !accepteeId || accepterId === accepteeId) {
-            return res.status(400).json({ error: "Accepter ID and acceptee ID must be present and distinct" });
+        if (!changerId || !changeeId || changerId === changeeId) {
+            return res.status(400).json({ error: "Changer ID and changee ID must be present and distinct" });
         }
 
         // Check if the request exists
-        const [lowerId, higherId] = accepterId < accepteeId ? [accepterId, accepteeId] : [accepteeId, accepterId];
+        const [lowerId, higherId] = changerId < changeeId ? [changerId, changeeId] : [changeeId, changerId];
         const checkRequestQuery = 'SELECT * FROM user_relations WHERE user1_id = $1 AND user2_id = $2';
         const requestResult = await pool.query(checkRequestQuery, [lowerId, higherId]);
         if (requestResult.rowCount === 0 || requestResult.rows[0].status !== 'pending') {
-            return res.status(404).json({ error: "Friend request not found or is invalid for acceptance." });
+            return res.status(404).json({ error: "Friend request not found or is invalid for alteration." });
         }
 
-        // Update the status to accepted
-        const updateQuery = `UPDATE user_relations SET status = 'accepted', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
-        await pool.query(updateQuery, [lowerId, higherId]);
-        console.log(`Friend request accepted from ${accepterId} to ${accepteeId}`);
-        return res.status(200).json({ message: "Friend request accepted successfully" });
+        // Update the status
+        const updateQuery = `UPDATE user_relations SET status = $1, updated_at = NOW() WHERE user1_id = $2 AND user2_id = $3`;
+        await pool.query(updateQuery, [newStatus, lowerId, higherId]);
+        console.log(`Friend request altered from user ${changerId} to user ${changeeId}. New status: ${newStatus}`);
+        return res.status(200).json({ message: "Friend request status updated successfully" });
 
     } catch (err) {
-        console.error("Error accepting friend request:", err);
+        console.error("Error altering friend request status:", err);
         return res.status(500).json({ error: "Internal Server Error" });
     }
 });
+
+
 
 router.post("/block-user", async (req, res) => {
     try {
