@@ -1,8 +1,6 @@
 import express from 'express';
-import pool from '../config/db.js';
 import dotEnv from 'dotenv';
 import { requireAuth } from '@clerk/express';
-import db from '../config/db.js';
 import * as spotifyAuthService from '../services/spotify-auth-service.js';
 dotEnv.config();
 
