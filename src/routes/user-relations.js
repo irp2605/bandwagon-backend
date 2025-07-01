@@ -137,21 +137,23 @@ router.post("/block-user", async (req, res) => {
         const requestResult = await pool.query(checkRequestQuery, [lowerId, higherId]);
 
         if (requestResult.rowCount > 0) {
+            let updateQuery = '';
             if (blockerId < blockeeId) {
-                const updateQuery = `UPDATE user_relations set user1_blocked_user2 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
+                updateQuery = `UPDATE user_relations set user1_blocked_user2 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
             }
             else {
-                const updateQuery = `UPDATE user_relations set user2_blocked_user1 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
+                updateQuery = `UPDATE user_relations set user2_blocked_user1 = true, status = 'declined', updated_at = NOW() WHERE user1_id = $1 AND user2_id = $2`;
             }
             await pool.query(updateQuery, [lowerId, higherId]);
             console.log(`User ${blockerId} blocked user ${blockeeId} on pre-existing relation`);
         }
         else {
+            let insertQuery = '';
             if(blockerId < blockeeId) {
-                const insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, true, false)`;
+                insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, true, false)`;
             }
             else {
-                const insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, false, true)`;
+                insertQuery = `INSERT INTO user_relations (user1_id, user2_id, status, initiated_by, user1_blocked_user2, user2_blocked_user1) VALUES ($1, $2, 'declined', $3, false, true)`;
             }
             await pool.query(insertQuery, [lowerId, higherId, blockerId]);
             console.log(`User ${blockerId} blocked user ${blockeeId} by creating a new relation`);
