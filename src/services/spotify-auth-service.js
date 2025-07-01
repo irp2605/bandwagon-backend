@@ -37,65 +37,65 @@ export const getSpotifyAuthUrl = async (user_id) => {
 }
 
 export const validateAndConsumeState = async (state) => {
-  if (!state) {
-    throw new Error('State parameter is required');
-  }
+    if (!state) {
+        throw new Error('State parameter is required');
+    }
 
-  const stateResult = await db.query(
-    'SELECT * FROM spotify_oauth_states WHERE state = $1 AND used = FALSE',
-    [state]
-  );
+    const stateResult = await db.query(
+        'SELECT * FROM spotify_oauth_states WHERE state = $1 AND used = FALSE',
+        [state]
+    );
 
-  if (stateResult.rows.length === 0) {
-    throw new Error('Invalid or expired state');
-  }
+    if (stateResult.rows.length === 0) {
+        throw new Error('Invalid or expired state');
+    }
 
-  const userId = stateResult.rows[0].user_id;
+    const user_id = stateResult.rows[0].user_id;
 
-  // Mark state as used
-  await db.query(
-    'UPDATE spotify_oauth_states SET used = TRUE WHERE state = $1',
-    [state]
-  );
+    // Mark state as used
+    await db.query(
+        'UPDATE spotify_oauth_states SET used = TRUE WHERE state = $1',
+        [state]
+    );
 
-  return userId;
+    return user_id;
 };
 
 export const exchangeCodeForTokens = async (code) => {
-  if (!code) {
-    throw new Error('Authorization code is required');
-  }
+    if (!code) {
+        throw new Error('Authorization code is required');
+    }
 
-  const formData = new URLSearchParams({
-    code: code,
-    redirect_uri: redirect_uri,
-    grant_type: 'authorization_code'
-  });
+    const formData = new URLSearchParams({
+        code: code,
+        redirect_uri: redirect_uri,
+        grant_type: 'authorization_code'
+    });
 
-  const authHeader = 'Basic ' + Buffer.from(`${client_id}:${client_secret}`).toString('base64');
+    const authHeader = 'Basic ' + Buffer.from(`${client_id}:${client_secret}`).toString('base64');
 
-  const response = await fetch('https://accounts.spotify.com/api/token', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Authorization': authHeader
-    },
-    body: formData
-  });
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': authHeader
+        },
+        body: formData
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error('Failed to retrieve access token:', response.status, errorText);
-    throw new Error(`Token request failed with status ${response.status}: ${errorText}`);
-  }
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to retrieve access token:', response.status, errorText);
+        throw new Error(`Token request failed with status ${response.status}: ${errorText}`);
+    }
 
-  return await response.json();
+    return await response.json();
 };
 
-export const storeUserTokens = async (userId, tokenData) => {
-  const { access_token, refresh_token, expires_in } = tokenData;
-  
-  const query = `
+export const storeUserTokens = async (user_id, tokenData) => {
+    const { access_token, refresh_token, expires_in } = tokenData;
+
+    const query = `
     UPDATE users 
     SET spotify_access_token = $1, 
         spotify_refresh_token = $2, 
@@ -103,25 +103,25 @@ export const storeUserTokens = async (userId, tokenData) => {
         updated_at = NOW() 
     WHERE clerk_id = $4
   `;
-  
-  const expiryTime = new Date(Date.now() + expires_in * 1000);
-  const values = [access_token, refresh_token, expiryTime, userId];
-  
-  const result = await db.query(query, values);
-  
-  if (result.rowCount === 0) {
-    throw new Error('User not found');
-  }
 
-  return {
-    userId,
-    expiresAt: expiryTime,
-    success: true
-  };
+    const expiryTime = new Date(Date.now() + expires_in * 1000);
+    const values = [access_token, refresh_token, expiryTime, user_id];
+
+    const result = await db.query(query, values);
+
+    if (result.rowCount === 0) {
+        throw new Error('User not found');
+    }
+
+    return {
+        user_id,
+        expiresAt: expiryTime,
+        success: true
+    };
 };
 
 export const generateRedirectUrl = (params) => {
-  const baseUrl = 'irp2605-bandwagon://spotify-auth';
-  const queryString = new URLSearchParams(params).toString();
-  return `${baseUrl}?${queryString}`;
+    const baseUrl = 'irp2605-bandwagon://spotify-auth';
+    const queryString = new URLSearchParams(params).toString();
+    return `${baseUrl}?${queryString}`;
 };

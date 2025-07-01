@@ -33,7 +33,6 @@ router.get('/authorization-callback', async (req, res) => {
     res.set('ngrok-skip-browser-warning', 'true');
 
     try {
-        // Handle authorization errors
         if (req.query.error) {
             console.error('Spotify authorization error:', req.query.error);
             return res.redirect(
@@ -41,14 +40,11 @@ router.get('/authorization-callback', async (req, res) => {
             );
         }
 
-        // Validate and consume state
         const userId = await spotifyAuthService.validateAndConsumeState(req.query.state);
         console.log('Validated state for user:', userId);
 
-        // Exchange authorization code for tokens
         const tokenData = await spotifyAuthService.exchangeCodeForTokens(req.query.code);
 
-        // Store tokens in database
         const result = await spotifyAuthService.storeUserTokens(userId, tokenData);
 
         console.log(`Spotify tokens stored successfully for user ${result.userId}`);
@@ -57,7 +53,6 @@ router.get('/authorization-callback', async (req, res) => {
     } catch (error) {
         console.error('Error during Spotify authorization callback:', error);
 
-        // Handle specific error types
         if (error.message.includes('Invalid or expired state')) {
             return res.redirect(
                 spotifyAuthService.generateRedirectUrl({ error: 'invalid_state' })
@@ -76,7 +71,6 @@ router.get('/authorization-callback', async (req, res) => {
             );
         }
 
-        // Generic error fallback
         res.redirect(
             spotifyAuthService.generateRedirectUrl({ error: 'callback_failed' })
         );
