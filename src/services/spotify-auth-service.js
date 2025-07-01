@@ -1,3 +1,12 @@
+import { pool } from '../db/postgres.js';
+import db from '../config/db.js';
+import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+import { URLSearchParams } from 'url';
+
+
+dotenv.config();
+
 const client_id = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
 const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify/authorization-callback";
@@ -41,7 +50,7 @@ export const validateAndConsumeState = async (state) => {
         throw new Error('State parameter is required');
     }
 
-    const stateResult = await db.query(
+    const stateResult = await pool.query(
         'SELECT * FROM spotify_oauth_states WHERE state = $1 AND used = FALSE',
         [state]
     );
@@ -53,7 +62,7 @@ export const validateAndConsumeState = async (state) => {
     const user_id = stateResult.rows[0].user_id;
 
     // Mark state as used
-    await db.query(
+    await pool.query(
         'UPDATE spotify_oauth_states SET used = TRUE WHERE state = $1',
         [state]
     );
@@ -107,7 +116,7 @@ export const storeUserTokens = async (user_id, tokenData) => {
     const expiryTime = new Date(Date.now() + expires_in * 1000);
     const values = [access_token, refresh_token, expiryTime, user_id];
 
-    const result = await db.query(query, values);
+    const result = await pool.query(query, values);
 
     if (result.rowCount === 0) {
         throw new Error('User not found');
