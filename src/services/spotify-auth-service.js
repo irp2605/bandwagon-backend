@@ -133,3 +133,61 @@ export const generateRedirectUrl = (params) => {
     const queryString = new URLSearchParams(params).toString();
     return `${baseUrl}?${queryString}`;
 };
+
+export const refreshSpotifyTokenIfExpired = async (user_id) => {
+    if (!user_id) {
+        throw new Error('User ID is required to refresh Spotify token');
+    }
+    const query = 'SELECT spotify_refresh_token, spotify_expires_at FROM users WHERE clerk_id = $1';
+    const result = await pool.query(query, [user_id]);
+    if (result.rows.length === 0) {
+        throw new Error('User not found');
+    }
+    const { spotify_refresh_token, spotify_expires_at } = result.rows[0];
+    if (!spotify_refresh_token) {
+        throw new Error('No Spotify refresh token found for user');
+    }
+    if (new Date() < new Date(spotify_expires_at)) {
+        console.log('Spotify token is still valid, no refresh needed');
+        return;
+    }
+
+    const url = 'https://accounts.spotify.com/api/token';
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: spotify_refresh_token,
+            client_id: client_id,
+        })
+
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to refresh access token:', response.status, errorText);
+        throw new Error(`Token refresh failed with status ${response.status}: ${errorText}`);
+    }
+
+    const responseData = await response.json();
+    
+    const updateQuery = `
+        UPDATE users 
+        SET spotify_access_token = $1, 
+            spotify_expires_at = $2, 
+            updated_at = NOW() 
+        WHERE clerk_id = $2
+    `;
+    const expiryTime = new Date(Date.now() + responseData.expires_in * 1000);
+    const updateValues = [responseData.access_token, expiryTime, user_id];
+    const updateResult = await pool.query(updateQuery, updateValues);
+    if (updateResult.rowCount === 0) {
+        throw new Error('Failed to update Spotify tokens for user');
+    }
+    console.log(`Spotify token refreshed successfully for user ${user_id}`);
+    return ;
+}
