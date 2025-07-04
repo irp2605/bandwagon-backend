@@ -19,16 +19,14 @@ function generateRandomString(length) {
     return result;
 }
 
-// Utility function to create query string
 function querystringify(params) {
     return new URLSearchParams(params).toString();
 }
 
 export const getSpotifyAuthUrl = async (user_id) => {
     const state = generateRandomString(16);
-    const scope = 'user-top-read user-read-recently-played';
+    const scope = 'user-top-read';
 
-    // Store state in session for verification later
     const query = 'INSERT INTO spotify_oauth_states (state, created_at, used, user_id) VALUES ($1, NOW(), FALSE, $2)';
     console.log('Storing state in database:', state, user_id);
     await pool.query(query, [state, user_id]);
@@ -143,13 +141,13 @@ export const refreshSpotifyTokenIfExpired = async (user_id) => {
     if (result.rows.length === 0) {
         throw new Error('User not found');
     }
-    const { spotify_refresh_token, spotify_expires_at } = result.rows[0];
+    const { spotify_access_token, spotify_refresh_token, spotify_expires_at } = result.rows[0];
     if (!spotify_refresh_token) {
         throw new Error('No Spotify refresh token found for user');
     }
     if (new Date() < new Date(spotify_expires_at)) {
         console.log('Spotify token is still valid, no refresh needed');
-        return;
+        return spotify_access_token;
     }
 
     const url = 'https://accounts.spotify.com/api/token';
@@ -189,5 +187,5 @@ export const refreshSpotifyTokenIfExpired = async (user_id) => {
         throw new Error('Failed to update Spotify tokens for user');
     }
     console.log(`Spotify token refreshed successfully for user ${user_id}`);
-    return ;
+    return responseData.access_token;
 }
