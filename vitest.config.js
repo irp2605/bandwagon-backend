@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     setupFiles: ['./src/test/setup.js'],
-    testMatch: ['**/__tests__/**/*.test.js', '**/tests/**/*.test.js'],
+    testMatch: ['**/__tests__/**/*.test.js', '**/test/**/*.test.js', '**/*.test.js'],
     coverage: {
       reporter: ['text', 'json', 'html'],
       exclude: [

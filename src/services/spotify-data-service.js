@@ -1,4 +1,4 @@
-import { pool } from '../config/db.js';
+import pool from '../config/db.js';
 import fetch from 'node-fetch';
 import * as spotifyAuthService from './spotify-auth-service.js';
 
