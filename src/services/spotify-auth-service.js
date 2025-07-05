@@ -1,4 +1,4 @@
-import { pool } from '../db/postgres.js';
+import { pool } from '../config/db.js';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import { URLSearchParams } from 'url';

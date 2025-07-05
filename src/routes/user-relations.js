@@ -5,7 +5,7 @@ import {
     alterFriendRequestStatus,
     getRelationsByStatus,
     blockUser
-} from './user-relations-service.js';
+} from '../services/user-relations-service.js';
 
 const router = express.Router();
 

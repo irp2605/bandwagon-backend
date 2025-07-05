@@ -3,8 +3,13 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const isTest = process.env.NODE_ENV === 'test';
+const connectionString = isTest
+  ? process.env.TEST_DATABASE_URL
+  : process.env.DATABASE_URL;
+
 const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: connectionString,
 });
 
 async function getPgVersion() {

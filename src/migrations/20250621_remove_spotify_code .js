@@ -22,5 +22,3 @@ export async function down() {
     console.log(error)
   }
 }
-
-up()

@@ -5,7 +5,9 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "NODE_ENV=test vitest",
+    "test:ui": "NODE_ENV=test vitest --ui",
+    "test:run": "NODE_ENV=test vitest run",
     "dev": "node --watch --env-file=.env src/server.js"
   },
   "author": "Ishan Rahul Patel",
@@ -20,5 +22,10 @@
     "pg": "^8.16.0",
     "request-promise-native": "^1.0.9",
     "svix": "^1.67.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0",
+    "supertest": "^6.3.3",
+    "@vitest/ui": "^1.0.0"
   }
 }
