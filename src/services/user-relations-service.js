@@ -6,7 +6,7 @@ export async function sendFriendRequest(senderId, receiverId) {
         throw { status: 400, message: "Sender ID and receiver ID must be present and distinct" };
     }
 
-    const checkReceiverQuery = 'SELECT id FROM users WHERE clerk_id = $1';
+    const checkReceiverQuery = 'SELECT clerk_id FROM users WHERE clerk_id = $1';
     const receiverResult = await pool.query(checkReceiverQuery, [receiverId]);
     if (receiverResult.rowCount === 0) {
         throw { status: 404, message: "Receiver not found" };
@@ -68,7 +68,8 @@ export async function blockUser(blockerId, blockeeId) {
         throw { status: 400, message: "Blocker ID and blockee ID must be present and distinct" };
     }
 
-    const checkQuery = 'SELECT id FROM users WHERE clerk_id = $1';
+    // Fix: Change 'id' to 'clerk_id'
+    const checkQuery = 'SELECT clerk_id FROM users WHERE clerk_id = $1';
     const result = await pool.query(checkQuery, [blockeeId]);
     if (result.rowCount === 0) {
         throw { status: 404, message: "Blockee not found" };
