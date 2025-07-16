@@ -8,7 +8,7 @@ dotenv.config();
 
 const client_id = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify/authorization-callback";
+const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify-auth/authorization-callback";
 
 function generateRandomString(length) {
     let result = '';
@@ -136,7 +136,7 @@ export const refreshSpotifyTokenIfExpired = async (user_id) => {
     if (!user_id) {
         throw new Error('User ID is required to refresh Spotify token');
     }
-    const query = 'SELECT spotify_refresh_token, spotify_expires_at FROM users WHERE clerk_id = $1';
+    const query = 'SELECT spotify_access_token, spotify_refresh_token, spotify_expires_at FROM users WHERE clerk_id = $1';
     const result = await pool.query(query, [user_id]);
     if (result.rows.length === 0) {
         throw new Error('User not found');
@@ -178,7 +178,7 @@ export const refreshSpotifyTokenIfExpired = async (user_id) => {
         SET spotify_access_token = $1, 
             spotify_expires_at = $2, 
             updated_at = NOW() 
-        WHERE clerk_id = $2
+        WHERE clerk_id = $3
     `;
     const expiryTime = new Date(Date.now() + responseData.expires_in * 1000);
     const updateValues = [responseData.access_token, expiryTime, user_id];

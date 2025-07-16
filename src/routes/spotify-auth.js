@@ -8,7 +8,7 @@ const router = express.Router();
 
 const client_id = process.env.SPOTIFY_CLIENT_ID;
 const client_secret = process.env.SPOTIFY_CLIENT_SECRET;
-const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify/authorization-callback";
+const redirect_uri = "https://subtle-mackerel-civil.ngrok-free.app/api/spotify-auth/authorization-callback";
 
 router.post('/get-auth-url', requireAuth(), async (req, res) => {
     try {

@@ -67,6 +67,7 @@ const fetchTopArtists = async (accessToken, timeRange) => {
     }
 
     const data = await response.json();
+    console.log(data.items.length);
     return data.items;
 };
 
