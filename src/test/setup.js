@@ -23,6 +23,9 @@ afterAll(async () => {
 beforeEach(async () => {
   // Clean up data between tests (but keep schema)
   // Order matters due to foreign key constraints
+  await pool.query('TRUNCATE TABLE concert_group_members RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE TABLE concert_groups RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE TABLE user_artists RESTART IDENTITY CASCADE');
   await pool.query('TRUNCATE TABLE user_top_artists RESTART IDENTITY CASCADE');
   await pool.query('TRUNCATE TABLE user_relations RESTART IDENTITY CASCADE');
   await pool.query('TRUNCATE TABLE spotify_oauth_states RESTART IDENTITY CASCADE');

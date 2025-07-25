@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "cross-env NODE_ENV=test vitest",
-    "test:ui": "cross-env NODE_ENV=test vitest --ui", 
+    "test:ui": "cross-env NODE_ENV=test vitest --ui",
     "test:run": "cross-env NODE_ENV=test vitest run",
     "dev": "node --watch --env-file=.env src/server.js"
   },
@@ -19,6 +19,7 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-session": "^1.18.1",
+    "node-fetch": "^3.3.2",
     "pg": "^8.16.0",
     "request-promise-native": "^1.0.9",
     "svix": "^1.67.0"

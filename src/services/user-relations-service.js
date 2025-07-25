@@ -43,6 +43,11 @@ export async function alterFriendRequestStatus(changerId, changeeId, newStatus) 
         throw { status: 404, message: "Friend request not found or is invalid for alteration." };
     }
 
+    if ((newStatus === 'accepted' || newStatus === 'declined') && result.rows[0].initiated_by === changerId) {
+        throw { status: 400, message: "You cannot alter a request you initiated." };
+    
+    }
+
     const updateQuery = `UPDATE user_relations SET status = $1, updated_at = NOW() WHERE user1_id = $2 AND user2_id = $3`;
     await pool.query(updateQuery, [newStatus, lowerId, higherId]);
 }
@@ -68,7 +73,6 @@ export async function blockUser(blockerId, blockeeId) {
         throw { status: 400, message: "Blocker ID and blockee ID must be present and distinct" };
     }
 
-    // Fix: Change 'id' to 'clerk_id'
     const checkQuery = 'SELECT clerk_id FROM users WHERE clerk_id = $1';
     const result = await pool.query(checkQuery, [blockeeId]);
     if (result.rowCount === 0) {

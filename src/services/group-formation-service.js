@@ -59,29 +59,37 @@ async function getFriendshipsBetweenUsers(userIds) {
         WHERE (user1_id = ANY($1) AND user2_id = ANY($1)) AND status = 'accepted'
     `;
 
-    return await pool.query(query, [userIds]);
+    const res = await pool.query(query, [userIds]);
+    return res.rows;
 }
 
 async function getUsersNearConcert(userIds, concert) {
-    const MAX_DISTANCE_MILES = 50
-    const query = `SELECT u.id, u.latitude, u.longitude,
-       ST_Distance(
-         ST_Point(u.longitude, u.latitude)::geography, 
-         ST_Point($2, $3)::geography
-       ) / 1609.34 as distance_miles
-        FROM users u 
-        WHERE u.id = ANY($1) 
+    const MAX_DISTANCE_MILES = 50;
+    const query = `
+        SELECT clerk_id, latitude, longitude,
+        ST_Distance(
+            ST_Point(longitude, latitude)::geography, 
+            ST_Point($2, $3)::geography
+        ) / 1609.34 as distance_miles
+        FROM users 
+        WHERE clerk_id = ANY($1) 
+        AND latitude IS NOT NULL 
+        AND longitude IS NOT NULL
         AND ST_Distance(
-        ST_Point(u.longitude, u.latitude)::geography, 
-        ST_Point($2, $3)::geography
+            ST_Point(longitude, latitude)::geography, 
+            ST_Point($2, $3)::geography
         ) / 1609.34 <= $4
-        ORDER BY distance_miles`
+        ORDER BY distance_miles
+    `;
+    
+    const result = await pool.query(query, [userIds, concert.longitude, concert.latitude, MAX_DISTANCE_MILES]);
+    return result.rows.map(row => row.clerk_id);
 }
 
-async function formConcertGroups(artistId, userIds) {
+async function formConcertGroups(userIds) {
     const uf = new UnionFind();
 
-    userIds.array.forEach(uid => {
+    userIds.forEach(uid => {
         uf.find(uid);
     });
 
@@ -97,51 +105,52 @@ async function formConcertGroups(artistId, userIds) {
 
 async function getSharedArtists() {
     const query = `
-        SELECT user_id, array_agg(artist_id) AS artists
+        SELECT artist_id, array_agg(user_id) AS user_ids
         FROM user_artists
-        GROUP BY user_id
+        GROUP BY artist_id
+        HAVING COUNT(user_id) >= 2
     `;
-
+    
     const result = await pool.query(query);
     return result.rows;
 }
 
 async function getArtist(artist_id) {
     const query = `
-        SELECT * FROM artists WHERE id = $1
+        SELECT * FROM artists WHERE spotify_id = $1
     `;
-
+    
     const result = await pool.query(query, [artist_id]);
     return result.rows[0];
 }
 
-async function formLocationAwareConcertGroups(artistId, allUserIds, concerts) {
-  const groupsByLocation = new Map();
-  
-  for (const concert of concerts) {
-    const nearbyUsers = await getUsersNearConcert(allUserIds, concert);
-    
-    if (nearbyUsers.length >= 2) {
-      const friendshipGroups = await formConcertGroups(artistId, nearbyUsers);
-      
-      groupsByLocation.set(concert.venue_id, {
-        concert: concert,
-        groups: friendshipGroups
-      });
+async function formLocationAwareConcertGroups(allUserIds, concerts) {
+    const groupsByLocation = new Map();
+
+    for (const concert of concerts) {
+        const nearbyUsers = await getUsersNearConcert(allUserIds, concert);
+
+        if (nearbyUsers.length >= 2) {
+            const friendshipGroups = await formConcertGroups(nearbyUsers);
+
+            groupsByLocation.set(concert.venue_id, {
+                concert: concert,
+                groups: friendshipGroups
+            });
+        }
     }
-  }
-  
-  return groupsByLocation;
+
+    return groupsByLocation;
 }
 
 async function findExistingGroups(artistId, venueId, concertDate) {
-  const query = `
+    const query = `
       SELECT * FROM concert_groups
       WHERE artist_id = $1 AND venue_id = $2 AND concert_date = $3
   `;
 
-  const result = await pool.query(query, [artistId, venueId, concertDate]);
-  return result.rows[0] || null;
+    const result = await pool.query(query, [artistId, venueId, concertDate]);
+    return result.rows[0] || null;
 }
 
 async function getGroupMembers(group) {
@@ -170,7 +179,7 @@ async function checkFriendshipWithAny(userId, groupMembers) {
 
 async function createConcertGroup(artistId, concert, userIds) {
     const client = await pool.connect();
-    
+
     try {
         await client.query('BEGIN');
 
@@ -181,19 +190,19 @@ async function createConcertGroup(artistId, concert, userIds) {
         `;
 
         const groupResult = await client.query(groupQuery, [
-            artistId, 
-            concert.venue_id, 
-            concert.venue_name, 
-            concert.venue_city, 
-            concert.venue_state, 
-            concert.venue_country, 
-            concert.latitude, 
-            concert.longitude, 
-            concert.date, 
-            concert.time, 
+            artistId,
+            concert.venue_id,
+            concert.venue_name,
+            concert.venue_city,
+            concert.venue_state,
+            concert.venue_country,
+            concert.latitude,
+            concert.longitude,
+            concert.date,
+            concert.time,
             concert.ticket_url
         ]);
-        
+
         const groupId = groupResult.rows[0].id;
 
         if (userIds.length > 0) {
@@ -202,7 +211,7 @@ async function createConcertGroup(artistId, concert, userIds) {
                 INSERT INTO concert_group_members (group_id, user_id)
                 VALUES ${memberValues}
             `;
-            
+
             await client.query(memberQuery);
         }
 
@@ -210,7 +219,7 @@ async function createConcertGroup(artistId, concert, userIds) {
 
         console.log(`Created concert group ${groupId} with ${userIds.length} members`);
         return groupId;
-        
+
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error creating concert group:', error);
@@ -221,117 +230,163 @@ async function createConcertGroup(artistId, concert, userIds) {
 }
 
 async function addUsersToGroup(groupId, userIds) {
-  if (userIds.length === 0) return;
-  
-  const query = `
+    if (userIds.length === 0) return;
+
+    const query = `
     INSERT INTO concert_group_members (group_id, user_id)
     VALUES ($1, $2)
     ON CONFLICT (group_id, user_id) DO NOTHING
   `;
-  
-  for (const userId of userIds) {
-    await db.query(query, [groupId, userId]);
-  }
-  
-  console.log(`Added ${userIds.length} users to group ${groupId}`);
+
+    for (const userId of userIds) {
+        await pool.query(query, [groupId, userId]);
+    }
+
+    console.log(`Added ${userIds.length} users to group ${groupId}`);
 }
 
 async function updateExistingGroups(artistId, venueId, concertDate, newUserIds) {
-  const existingGroup = await findExistingGroup(artistId, venueId, concertDate);
-  
-  if (!existingGroup) return null;
-  
-  const currentMembers = await getGroupMembers(existingGroup.id);
-  const candidateUsers = newUserIds.filter(id => !currentMembers.includes(id));
-  
-  if (candidateUsers.length === 0) return existingGroup.id;
-  
-  const newMembers = [];
-  for (const candidateId of candidateUsers) {
-    const isFriend = await checkFriendshipWithAny(candidateId, currentMembers);
-    if (isFriend) {
-      newMembers.push(candidateId);
+    const existingGroup = await findExistingGroups(artistId, venueId, concertDate);
+
+    if (!existingGroup) return null;
+
+    const currentMembers = await getGroupMembers(existingGroup.id);
+    const candidateUsers = newUserIds.filter(id => !currentMembers.includes(id));
+
+    if (candidateUsers.length === 0) return existingGroup.id;
+
+    const newMembers = [];
+    for (const candidateId of candidateUsers) {
+        const isFriend = await checkFriendshipWithAny(candidateId, currentMembers);
+        if (isFriend) {
+            newMembers.push(candidateId);
+        }
     }
-  }
-  
-  if (newMembers.length > 0) {
-    await addUsersToGroup(existingGroup.id, newMembers);
-  }
-  
-  return existingGroup.id;
+
+    if (newMembers.length > 0) {
+        await addUsersToGroup(existingGroup.id, newMembers);
+    }
+
+    return existingGroup.id;
 }
 
 async function processLocationGroups(artistId, concert, friendshipGroups) {
-  const processedGroups = [];
-  
-  for (const group of friendshipGroups) {
-    if (group.length >= 2) {
-      // Check if group already exists for this artist + concert
-      const existingGroupId = await updateExistingGroups(
-        artistId, 
-        concert.venue_id, 
-        concert.date, 
-        group
-      );
-      
-      if (existingGroupId) {
-        processedGroups.push(existingGroupId);
-      } else {
-        // Create new group
-        const newGroupId = await createConcertGroup(artistId, concert, group);
-        processedGroups.push(newGroupId);
-      }
+    const processedGroups = [];
+
+    for (const group of friendshipGroups) {
+        if (group.length >= 2) {
+            const existingGroupId = await updateExistingGroups(
+                artistId,
+                concert.venue_id,
+                concert.date,
+                group
+            );
+
+            if (existingGroupId) {
+                processedGroups.push(existingGroupId);
+            } else {
+                const newGroupId = await createConcertGroup(artistId, concert, group);
+                processedGroups.push(newGroupId);
+            }
+        }
     }
-  }
-  
-  return processedGroups;
+
+    return processedGroups;
 }
 
 async function searchTicketMasterAPIbyArtist(artistName) {
     try {
-        // Step 1: Search for attractions
-        const attractionsResponse = await fetch(
-            `https://app.ticketmaster.com/discovery/v2/attractions.json?keyword=${encodeURIComponent(artistName)}&size=10&apikey=${process.env.TICKETMASTER_API_KEY}`
-        );
-        
+        console.log(`Searching for artist: ${artistName}`);
+
+        const attractionsUrl = `https://app.ticketmaster.com/discovery/v2/attractions.json?keyword=${encodeURIComponent(artistName)}&size=10&apikey=${process.env.TICKETMASTER_API_KEY}`;
+        console.log('Attractions URL:', attractionsUrl.replace(process.env.TICKETMASTER_API_KEY, 'API_KEY_HIDDEN'));
+
+        const attractionsResponse = await fetch(attractionsUrl);
+
         if (!attractionsResponse.ok) {
-            throw new Error(`Attractions API error: ${attractionsResponse.status}`);
+            const errorText = await attractionsResponse.text();
+            console.error(`Attractions API error: ${attractionsResponse.status} - ${errorText}`);
+            throw new Error(`Attractions API error: ${attractionsResponse.status} - ${errorText}`);
         }
-        
+
         const attractionsData = await attractionsResponse.json();
-        
+        console.log(`Found ${attractionsData._embedded?.attractions?.length || 0} attractions`);
+
         if (!attractionsData._embedded || !attractionsData._embedded.attractions || attractionsData._embedded.attractions.length === 0) {
-            return []; // No attractions found, return empty array
+            console.log(`No attractions found for ${artistName}`);
+            return [];
         }
-        
-        // Find the best matching attraction (case-insensitive exact match preferred)
+
         const attractions = attractionsData._embedded.attractions;
-        let bestMatch = attractions[0]; // Default to first result
-        
-        // Look for exact match first
-        const exactMatch = attractions.find(attraction => 
+        let bestMatch = attractions[0];
+
+        const exactMatch = attractions.find(attraction =>
             attraction.name.toLowerCase() === artistName.toLowerCase()
         );
-        
+
         if (exactMatch) {
             bestMatch = exactMatch;
+            console.log(`Found exact match: ${bestMatch.name}`);
+        } else {
+            console.log(`Using best match: ${bestMatch.name}`);
         }
-        
-        // Step 2: Search for events using the attraction ID
-        const currentDate = new Date().toISOString();
-        const eventsResponse = await fetch(
-            `https://app.ticketmaster.com/discovery/v2/events.json?attractionId=${bestMatch.id}&startDateTime=${currentDate}&sort=date,asc&includeTBA=no&includeTBD=no&apikey=${process.env.TICKETMASTER_API_KEY}`
-        );
-        
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        const now = new Date();
+        const currentDate = now.toISOString().split('T')[0] + 'T00:00:00Z';
+
+        const eventsUrl = `https://app.ticketmaster.com/discovery/v2/events.json?attractionId=${bestMatch.id}&startDateTime=${currentDate}&sort=date,asc&size=50&apikey=${process.env.TICKETMASTER_API_KEY}`;
+        console.log('Events URL:', eventsUrl.replace(process.env.TICKETMASTER_API_KEY, 'API_KEY_HIDDEN'));
+
+        const eventsResponse = await fetch(eventsUrl);
+
         if (!eventsResponse.ok) {
-            throw new Error(`Events API error: ${eventsResponse.status}`);
+            const errorText = await eventsResponse.text();
+            console.error(`Events API error: ${eventsResponse.status} - ${errorText}`);
+
+            if (eventsResponse.status === 400) {
+                console.log('Retrying without startDateTime parameter...');
+                const fallbackUrl = `https://app.ticketmaster.com/discovery/v2/events.json?attractionId=${bestMatch.id}&sort=date,asc&size=50&apikey=${process.env.TICKETMASTER_API_KEY}`;
+
+                const fallbackResponse = await fetch(fallbackUrl);
+                if (!fallbackResponse.ok) {
+                    throw new Error(`Events API error: ${fallbackResponse.status}`);
+                }
+                const fallbackData = await fallbackResponse.json();
+                const events = fallbackData._embedded?.events || [];
+                console.log(`Found ${events.length} events (fallback method)`);
+
+                return events
+                    .filter(event => {
+                        const eventDate = new Date(event.dates?.start?.localDate || event.dates?.start?.dateTime);
+                        return eventDate >= now;
+                    })
+                    .map(event => ({
+                        id: event.id,
+                        name: event.name,
+                        date: event.dates?.start?.localDate || event.dates?.start?.dateTime,
+                        time: event.dates?.start?.localTime,
+                        venue_name: event._embedded?.venues?.[0]?.name || 'Unknown Venue',
+                        venue_id: event._embedded?.venues?.[0]?.id,
+                        city: event._embedded?.venues?.[0]?.city?.name,
+                        state: event._embedded?.venues?.[0]?.state?.name,
+                        country: event._embedded?.venues?.[0]?.country?.name,
+                        latitude: event._embedded?.venues?.[0]?.location?.latitude,
+                        longitude: event._embedded?.venues?.[0]?.location?.longitude,
+                        ticket_url: event.url,
+                        artist_name: bestMatch.name,
+                        artist_id: bestMatch.id
+                    }));
+            }
+
+            throw new Error(`Events API error: ${eventsResponse.status} - ${errorText}`);
         }
-        
+
         const eventsData = await eventsResponse.json();
-        
-        // Return array of concert objects formatted for your logic
-        const events = eventsData._embedded && eventsData._embedded.events ? eventsData._embedded.events : [];
-        
+        const events = eventsData._embedded?.events || [];
+        console.log(`Found ${events.length} upcoming events for ${bestMatch.name}`);
+
         return events.map(event => ({
             id: event.id,
             name: event.name,
@@ -348,9 +403,69 @@ async function searchTicketMasterAPIbyArtist(artistName) {
             artist_name: bestMatch.name,
             artist_id: bestMatch.id
         }));
-        
+
     } catch (error) {
-        console.error(`Error in checkConcertAPI for ${artistName}:`, error.message);
+        console.error(`Error in searchTicketMasterAPIbyArtist for ${artistName}:`, error.message);
         return [];
     }
 }
+
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+async function dailyConcertCheck() {
+    const startTime = Date.now();
+    console.log("Starting daily concert check.")
+
+    try {
+        const sharedArtists = await getSharedArtists();
+        console.log(`Processing ${sharedArtists.length} artists with shared followers`);
+
+        let processedArtists = 0;
+        let totalGroupsCreated = 0;
+
+        for (const { artist_id, user_ids } of sharedArtists) {
+            const artistStart = Date.now()
+
+            try {
+                const artist = await getArtist(artist_id);
+                const concerts = await searchTicketMasterAPIbyArtist(artist.name);
+
+                if (concerts.length > 0) {
+                    console.log(`Found ${concerts.length} concerts for ${artist.name}`);
+
+                    // Group by location first, then by friendships
+                    const locationGroups = await formLocationAwareConcertGroups(
+                        user_ids,
+                        concerts
+                    );
+
+                    // Process each location's groups
+                    for (const [venueId, { concert, groups }] of locationGroups) {
+                        const processedGroups = await processLocationGroups(artist_id, concert, groups);
+                        totalGroupsCreated += processedGroups.length;
+
+                        console.log(`Created/updated ${processedGroups.length} groups for ${artist.name} at ${concert.venue_name} (venue: ${venueId})`);
+                    }
+                }
+
+                processedArtists++;
+                const artistTime = Date.now() - artistStart;
+
+                if (artistTime > 5000) {
+                    console.log(`Slow artist ${artist.name}: ${artistTime}ms for ${user_ids.length} users`);
+                }
+
+                await delay(1000);
+            } catch (error) {
+
+                console.error(`Error processing artist ${artist.name}:`, error.message);
+            }
+        }
+
+
+    } catch (error) {
+        console.log("Problem with daily concert check. Incomplete!")
+    }
+}
+
+export { searchTicketMasterAPIbyArtist, dailyConcertCheck, getFriendshipsBetweenUsers, getUsersNearConcert, formConcertGroups, getSharedArtists, getArtist, formLocationAwareConcertGroups, findExistingGroups, getGroupMembers, checkFriendshipWithAny, createConcertGroup, addUsersToGroup, updateExistingGroups, processLocationGroups };
