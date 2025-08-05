@@ -125,11 +125,13 @@ async function getArtist(artist_id) {
 }
 
 async function formLocationAwareConcertGroups(allUserIds, concerts) {
+    console.log(`Forming location-aware concert groups for ${concerts.length} concerts...`);
     const groupsByLocation = new Map();
 
     for (const concert of concerts) {
         const nearbyUsers = await getUsersNearConcert(allUserIds, concert);
-
+        console.log(`Found ${nearbyUsers.length} users near concert at ${concert.venue_name}`);
+        console.log('Nearby users:', nearbyUsers);
         if (nearbyUsers.length >= 2) {
             const friendshipGroups = await formConcertGroups(nearbyUsers);
 
@@ -164,17 +166,20 @@ async function getGroupMembers(group) {
 }
 
 async function checkFriendshipWithAny(userId, groupMembers) {
+    if (!groupMembers || groupMembers.length === 0) {
+        return false;
+    }
+
     const query = `
         SELECT EXISTS (
             SELECT 1 FROM user_relations
-            WHERE (user1_id = $1 AND user2_id = ANY($2)) OR (user2_id = $1 AND user1_id = ANY($2))
+            WHERE ((user1_id = $1 AND user2_id = ANY($2)) OR (user2_id = $1 AND user1_id = ANY($2)))
             AND status = 'accepted'
-            LIMIT 1
-        )
+        ) as friendship_exists
     `;
 
     const result = await pool.query(query, [userId, groupMembers]);
-    return result.rows.length > 0;
+    return result.rows[0].friendship_exists;
 }
 
 async function createConcertGroup(artistId, concert, userIds) {
@@ -250,21 +255,29 @@ async function updateExistingGroups(artistId, venueId, concertDate, newUserIds) 
 
     if (!existingGroup) return null;
 
-    const currentMembers = await getGroupMembers(existingGroup.id);
+    let currentMembers = await getGroupMembers(existingGroup);
     const candidateUsers = newUserIds.filter(id => !currentMembers.includes(id));
 
     if (candidateUsers.length === 0) return existingGroup.id;
 
-    const newMembers = [];
-    for (const candidateId of candidateUsers) {
-        const isFriend = await checkFriendshipWithAny(candidateId, currentMembers);
-        if (isFriend) {
-            newMembers.push(candidateId);
-        }
-    }
+    // Iteratively add users who are friends with anyone already in the group
+    let addedSomeone = true;
+    const remainingCandidates = [...candidateUsers];
 
-    if (newMembers.length > 0) {
-        await addUsersToGroup(existingGroup.id, newMembers);
+    while (addedSomeone && remainingCandidates.length > 0) {
+        addedSomeone = false;
+        
+        for (let i = remainingCandidates.length - 1; i >= 0; i--) {
+            const candidateId = remainingCandidates[i];
+            const isFriend = await checkFriendshipWithAny(candidateId, currentMembers);
+            
+            if (isFriend) {
+                await addUsersToGroup(existingGroup.id, [candidateId]);
+                currentMembers.push(candidateId); // Add to current members immediately
+                remainingCandidates.splice(i, 1); // Remove from candidates
+                addedSomeone = true;
+            }
+        }
     }
 
     return existingGroup.id;
@@ -275,16 +288,37 @@ async function processLocationGroups(artistId, concert, friendshipGroups) {
 
     for (const group of friendshipGroups) {
         if (group.length >= 2) {
-            const existingGroupId = await updateExistingGroups(
-                artistId,
-                concert.venue_id,
-                concert.date,
-                group
-            );
+            // Check if there's an existing group that this new group can merge with
+            const existingGroup = await findExistingGroups(artistId, concert.venue_id, concert.date);
+            
+            if (existingGroup) {
+                const existingMembers = await getGroupMembers(existingGroup);
+                
+                let canMerge = false;
+                for (const newUserId of group) {
+                    if (!existingMembers.includes(newUserId)) {
+                        const isFriend = await checkFriendshipWithAny(newUserId, existingMembers);
+                        if (isFriend) {
+                            canMerge = true;
+                            break;
+                        }
+                    }
+                }
 
-            if (existingGroupId) {
-                processedGroups.push(existingGroupId);
+                if (canMerge) {
+                    // Merge this group with existing group
+                    const usersToAdd = group.filter(userId => !existingMembers.includes(userId));
+                    if (usersToAdd.length > 0) {
+                        await addUsersToGroup(existingGroup.id, usersToAdd);
+                    }
+                    processedGroups.push(existingGroup.id);
+                } else {
+                    // No friendship connection - create separate group
+                    const newGroupId = await createConcertGroup(artistId, concert, group);
+                    processedGroups.push(newGroupId);
+                }
             } else {
+                // No existing group - create new one
                 const newGroupId = await createConcertGroup(artistId, concert, group);
                 processedGroups.push(newGroupId);
             }
