@@ -52,6 +52,8 @@ export async function alterFriendRequestStatus(changerId, changeeId, newStatus) 
     await pool.query(updateQuery, [newStatus, lowerId, higherId]);
 }
 
+// TODO: Add a decline a friend request function (should just delete the row in the database)
+
 export async function getRelationsByStatus(userId, status) {
     const validStatuses = ['pending', 'accepted', 'declined'];
     if (!userId || !status || !validStatuses.includes(status)) {
